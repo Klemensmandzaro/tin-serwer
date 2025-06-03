@@ -23,10 +23,16 @@ wss.on('connection', function connection(ws, req) {
     
     // Send "cześć" message to the client
     try {
-        ws.send('cześć');
-        console.log('Sent "cześć" message to client');
+        console.log('Attempting to send "cześć" message...');
+        ws.send('cześć', (error) => {
+            if (error) {
+                console.error('Error sending message:', error);
+            } else {
+                console.log('Successfully sent "cześć" message');
+            }
+        });
     } catch (error) {
-        console.error('Error sending message:', error);
+        console.error('Error in send attempt:', error);
     }
 
     // Handle messages from client
