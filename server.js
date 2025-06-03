@@ -1,57 +1,133 @@
 const WebSocket = require('ws');
 
-// Create WebSocket server
+const BOARD_SIZE = 10;
+const MINES_COUNT = 15;
+
+function createBoard() {
+    let board = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(0));
+    let mines = 0;
+    while (mines < MINES_COUNT) {
+        let x = Math.floor(Math.random() * BOARD_SIZE);
+        let y = Math.floor(Math.random() * BOARD_SIZE);
+        if (board[x][y] !== 'M') {
+            board[x][y] = 'M';
+            mines++;
+        }
+    }
+    for (let x = 0; x < BOARD_SIZE; x++) {
+        for (let y = 0; y < BOARD_SIZE; y++) {
+            if (board[x][y] === 'M') continue;
+            let count = 0;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    let nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && nx < BOARD_SIZE && ny >= 0 && ny < BOARD_SIZE) {
+                        if (board[nx][ny] === 'M') count++;
+                    }
+                }
+            }
+            board[x][y] = count;
+        }
+    }
+    return board;
+}
+
+function reveal(board, revealed, x, y) {
+    if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE || revealed[x][y]) return;
+    revealed[x][y] = true;
+    if (board[x][y] === 0) {
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx !== 0 || dy !== 0) reveal(board, revealed, x + dx, y + dy);
+            }
+        }
+    }
+}
+
 const wss = new WebSocket.Server({ 
     port: process.env.PORT || 8080,
-    // Allow connections from any origin
     verifyClient: (info, callback) => {
-        console.log('New connection attempt from:', info.origin);
         callback(true);
     }
 });
 
-// Add error handling for the server
-wss.on('error', function(error) {
-    console.error('WebSocket Server Error:', error);
-});
+wss.on('connection', function connection(ws) {
+    // Stan gry dla tego klienta
+    let board = createBoard();
+    let revealed = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(false));
+    let flagged = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(false));
+    let gameOver = false;
 
-// Connection event handler
-wss.on('connection', function connection(ws, req) {
-    const clientIP = req.socket.remoteAddress;
-    console.log('New client connected from:', clientIP);
-    console.log('Request headers:', req.headers);
-    
-    // Send "cześć" message to the client
-    try {
-        console.log('Attempting to send "cześć" message...');
-        ws.send('cześć', (error) => {
-            if (error) {
-                console.error('Error sending message:', error);
-            } else {
-                console.log('Successfully sent "cześć" message');
-            }
-        });
-    } catch (error) {
-        console.error('Error in send attempt:', error);
-    }
+    // Wyślij początkowy stan gry
+    ws.send(JSON.stringify({
+        type: 'init',
+        boardSize: BOARD_SIZE,
+        mines: MINES_COUNT,
+        revealed,
+        flagged,
+        gameOver
+    }));
 
-    // Handle messages from client
     ws.on('message', function incoming(message) {
-        console.log('Received message from', clientIP, ':', message.toString());
+        if (gameOver) return;
+        let data;
+        try {
+            data = JSON.parse(message);
+        } catch (e) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON' }));
+            return;
+        }
+
+        if (data.type === 'reveal') {
+            const { x, y } = data;
+            if (flagged[x][y] || revealed[x][y]) return;
+            if (board[x][y] === 'M') {
+                revealed[x][y] = true;
+                gameOver = true;
+                ws.send(JSON.stringify({
+                    type: 'gameover',
+                    result: 'lose',
+                    board,
+                    revealed
+                }));
+            } else {
+                reveal(board, revealed, x, y);
+                // Sprawdź wygraną
+                let safe = 0;
+                for (let i = 0; i < BOARD_SIZE; i++)
+                    for (let j = 0; j < BOARD_SIZE; j++)
+                        if (!revealed[i][j] && board[i][j] !== 'M') safe++;
+                if (safe === 0) {
+                    gameOver = true;
+                    ws.send(JSON.stringify({
+                        type: 'gameover',
+                        result: 'win',
+                        board,
+                        revealed
+                    }));
+                } else {
+                    ws.send(JSON.stringify({
+                        type: 'update',
+                        revealed
+                    }));
+                }
+            }
+        } else if (data.type === 'flag') {
+            const { x, y } = data;
+            if (revealed[x][y]) return;
+            flagged[x][y] = !flagged[x][y];
+            ws.send(JSON.stringify({
+                type: 'update',
+                flagged
+            }));
+        }
     });
 
-    // Handle client disconnection
-    ws.on('close', function close(code, reason) {
-        console.log('Client disconnected:', clientIP, 'Code:', code, 'Reason:', reason);
-    });
-
-    // Handle errors for this connection
-    ws.on('error', function(error) {
-        console.error('WebSocket Connection Error for', clientIP, ':', error);
+    ws.on('close', function close() {
+        // Możesz dodać logikę czyszczenia, jeśli chcesz
     });
 });
 
-// Start the server
 const PORT = process.env.PORT || 8080;
-console.log(`WebSocket server is running on port ${PORT}`);
-console.log('Waiting for connections...'); 
+console.log(`WebSocket Saper server is running on port ${PORT}`);
