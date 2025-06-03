@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 
 const BOARD_SIZE = 10;
 const MINES_COUNT = 15;
+let globalWins = 0; // GLOBALNY licznik zwycięstw
 
 function createBoard() {
     let board = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(0));
@@ -59,14 +60,15 @@ wss.on('connection', function connection(ws) {
     let flagged = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(false));
     let gameOver = false;
 
-    // Wyślij początkowy stan gry
+    // Wyślij początkowy stan gry + globalne zwycięstwa
     ws.send(JSON.stringify({
         type: 'init',
         boardSize: BOARD_SIZE,
         mines: MINES_COUNT,
         revealed,
         flagged,
-        gameOver
+        gameOver,
+        globalWins
     }));
 
     ws.on('message', function incoming(message) {
@@ -89,7 +91,8 @@ wss.on('connection', function connection(ws) {
                     type: 'gameover',
                     result: 'lose',
                     board,
-                    revealed
+                    revealed,
+                    globalWins
                 }));
             } else {
                 reveal(board, revealed, x, y);
@@ -100,16 +103,19 @@ wss.on('connection', function connection(ws) {
                         if (!revealed[i][j] && board[i][j] !== 'M') safe++;
                 if (safe === 0) {
                     gameOver = true;
+                    globalWins++;
                     ws.send(JSON.stringify({
                         type: 'gameover',
                         result: 'win',
                         board,
-                        revealed
+                        revealed,
+                        globalWins
                     }));
                 } else {
                     ws.send(JSON.stringify({
                         type: 'update',
-                        revealed
+                        revealed,
+                        globalWins
                     }));
                 }
             }
@@ -119,7 +125,8 @@ wss.on('connection', function connection(ws) {
             flagged[x][y] = !flagged[x][y];
             ws.send(JSON.stringify({
                 type: 'update',
-                flagged
+                flagged,
+                globalWins
             }));
         }
     });
